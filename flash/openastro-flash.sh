@@ -235,9 +235,11 @@ cmd_backup() {
     set -o pipefail
     if [ "$OS" = Darwin ]; then
         sudo dd if="$(raw_device)" bs=4m | xz -T0 -2 > "$out"
+        log "Read complete. Computing SHA-256 checksum (takes a few minutes, no output)..."
         ( cd "$(dirname "$out")" && shasum -a 256 "$(basename "$out")" > "$(basename "$out").sha256" )
     else
         sudo dd if="$(raw_device)" bs=4M status=progress | xz -T0 -2 > "$out"
+        log "Read complete. Computing SHA-256 checksum (takes a few minutes, no output)..."
         ( cd "$(dirname "$out")" && sha256sum "$(basename "$out")" > "$(basename "$out").sha256" )
     fi
     log "Backup complete: $out ($(du -h "$out" | cut -f1))"
@@ -249,7 +251,6 @@ write_image() {
     [ -f "$img" ] || die "image not found: $img"
     run_rpiboot_and_find_device
     unmount_device
-    log "Writing $label -> $DEVICE ..."
     set -o pipefail
     decompress() {
         case "$img" in
@@ -258,14 +259,37 @@ write_image() {
         *)    cat "$img" ;;
         esac
     }
+    sha_cmd() {
+        if [ "$OS" = Darwin ]; then shasum -a 256; else sha256sum; fi
+    }
+
+    # Hash and count the bytes as they stream to the disk, so the write can
+    # be verified afterwards without decompressing the image again.
+    local tmp want bytes got
+    tmp="$(mktemp -d)"
+    log "Writing $label -> $DEVICE ..."
     if [ "$OS" = Darwin ]; then
-        decompress | sudo dd of="$(raw_device)" bs=4m
+        decompress | tee >(sha_cmd | awk '{print $1}' > "$tmp/hash") >(wc -c > "$tmp/size") | sudo dd of="$(raw_device)" bs=4m
     else
-        decompress | sudo dd of="$(raw_device)" bs=4M status=progress conv=fsync
+        decompress | tee >(sha_cmd | awk '{print $1}' > "$tmp/hash") >(wc -c > "$tmp/size") | sudo dd of="$(raw_device)" bs=4M status=progress conv=fsync
     fi
+    log "Write complete. Flushing buffers to the eMMC (this can take a minute - the activity LED blinks)..."
     sync
+    want="$(cat "$tmp/hash")"
+    bytes="$(tr -dc 0-9 < "$tmp/size")"
+    rm -rf "$tmp"
+
+    log "Verifying: reading back $((bytes / 1000000)) MB from the eMMC and comparing checksums..."
+    if [ "$OS" = Darwin ]; then
+        got="$( { sudo dd if="$(raw_device)" bs=4m 2>/dev/null || true; } | head -c "$bytes" | sha_cmd | awk '{print $1}')"
+    else
+        got="$(sudo dd if="$(raw_device)" bs=4M iflag=count_bytes count="$bytes" status=progress | sha_cmd | awk '{print $1}')"
+    fi
+    [ "$want" = "$got" ] || die "VERIFICATION FAILED - the data on the eMMC does not match the image. Do not boot it; re-run the flash (check the USB cable/port)."
+    log "Verification PASSED - the eMMC matches the image."
+
     case "$OS" in Darwin) diskutil eject "$DEVICE" || true ;; esac
-    log "$label written. Disconnect USB, remove the jumper, and power-cycle."
+    log "$label written and verified. Disconnect USB, remove the jumper, and power-cycle."
 }
 
 cmd_flash() {

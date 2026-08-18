@@ -191,11 +191,15 @@ function Open-RawDisk([int]$Number, [System.IO.FileAccess]$Access) {
     return $stream
 }
 
+# Copies src -> dst with progress; also SHA-256 hashes the bytes as they
+# pass through, so a write can be verified afterwards. Returns @{Bytes; Hash}.
 function Copy-Stream($src, $dst, [long]$total, [string]$verb) {
+    $hasher = [Security.Cryptography.IncrementalHash]::CreateHash([Security.Cryptography.HashAlgorithmName]::SHA256)
     $buf = New-Object byte[] (4MB)
     [long]$done = 0; $sw = [Diagnostics.Stopwatch]::StartNew()
     while (($n = $src.Read($buf, 0, $buf.Length)) -gt 0) {
         $dst.Write($buf, 0, $n)
+        $hasher.AppendData($buf, 0, $n)
         $done += $n
         if ($sw.ElapsedMilliseconds -gt 2000) {
             if ($total -gt 0) {
@@ -208,7 +212,32 @@ function Copy-Stream($src, $dst, [long]$total, [string]$verb) {
     }
     $dst.Flush()
     Write-Progress -Activity $verb -Completed
-    return $done
+    return [pscustomobject]@{
+        Bytes = $done
+        Hash  = ([BitConverter]::ToString($hasher.GetHashAndReset()) -replace '-', '').ToLower()
+    }
+}
+
+# SHA-256 of the first $Bytes bytes of a physical disk, with progress.
+function Get-DiskHash([int]$Number, [long]$Bytes, [string]$verb) {
+    $hasher = [Security.Cryptography.IncrementalHash]::CreateHash([Security.Cryptography.HashAlgorithmName]::SHA256)
+    $raw = Open-RawDisk $Number ([System.IO.FileAccess]::Read)
+    try {
+        $buf = New-Object byte[] (4MB)
+        [long]$done = 0; $sw = [Diagnostics.Stopwatch]::StartNew()
+        while ($done -lt $Bytes) {
+            $n = $raw.Read($buf, 0, [int][math]::Min($buf.Length, $Bytes - $done))
+            if ($n -le 0) { break }
+            $hasher.AppendData($buf, 0, $n)
+            $done += $n
+            if ($sw.ElapsedMilliseconds -gt 2000) {
+                Write-Progress -Activity $verb -Status ("{0:N1} / {1:N1} GB" -f ($done/1e9), ($Bytes/1e9)) -PercentComplete ([math]::Min(100, 100*$done/$Bytes))
+                $sw.Restart()
+            }
+        }
+        Write-Progress -Activity $verb -Completed
+        return ([BitConverter]::ToString($hasher.GetHashAndReset()) -replace '-', '').ToLower()
+    } finally { $raw.Dispose() }
 }
 
 # ------------------------------------------------------------
@@ -232,6 +261,7 @@ function Invoke-Backup([string]$OutPath) {
     $gz  = New-Object System.IO.Compression.GZipStream($out, [System.IO.Compression.CompressionLevel]::Fastest)
     try     { Copy-Stream $raw $gz $disk.Size 'Backing up eMMC' | Out-Null }
     finally { $gz.Dispose(); $out.Dispose(); $raw.Dispose() }
+    Log 'Read complete. Computing SHA-256 checksum (takes a few minutes, no output)...'
     $hash = (Get-FileHash -Algorithm SHA256 $OutPath).Hash.ToLower()
     "$hash  $(Split-Path -Leaf $OutPath)" | Set-Content "$OutPath.sha256"
     Log "Backup complete: $OutPath ($([math]::Round((Get-Item $OutPath).Length/1e9, 2)) GB)"
@@ -260,11 +290,19 @@ function Invoke-Write([string]$ImagePath, [string]$Label) {
         $total = (Get-Item $ImagePath).Length
     }
     $raw = Open-RawDisk $disk.Number ([System.IO.FileAccess]::Write)
-    try     { Copy-Stream $src $raw $total "Writing $Label" | Out-Null }
+    try     { $res = Copy-Stream $src $raw $total "Writing $Label" }
     finally { $raw.Dispose(); $src.Dispose() }
+    Log 'Write complete. Flushing buffers to the eMMC (this can take a minute - the activity LED blinks)...'
+
+    Log ("Verifying: reading back {0:N0} MB from the eMMC and comparing checksums..." -f ($res.Bytes / 1e6))
+    $got = Get-DiskHash $disk.Number $res.Bytes "Verifying $Label"
+    if ($got -ne $res.Hash) {
+        Fail 'VERIFICATION FAILED - the data on the eMMC does not match the image. Do not boot it; re-run the flash (check the USB cable/port).'
+    }
+    Log 'Verification PASSED - the eMMC matches the image.'
 
     Set-Disk -Number $disk.Number -IsOffline $false -ErrorAction SilentlyContinue
-    Log "$Label written. Disconnect USB, remove the jumper, and power-cycle."
+    Log "$Label written and verified. Disconnect USB, remove the jumper, and power-cycle."
 }
 
 function Invoke-Flash([string]$ImagePath) {
