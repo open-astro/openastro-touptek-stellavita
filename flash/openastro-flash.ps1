@@ -3,36 +3,39 @@
 OpenAstro StellaVita flash tool (Windows). Run from an elevated PowerShell.
 
 .DESCRIPTION
-The StellaVita is a Raspberry Pi CM4 with a 32 GB eMMC. The eMMC is exposed
-as a USB disk via rpiboot (Raspberry Pi usbboot) with the board in USB
-device-boot mode.
+Just run it:   .\openastro-flash.ps1
 
-Commands:
-  install-rpiboot            download + run the official rpiboot installer
-  backup  [-Path out.img.gz] save the current eMMC (stock ToupTek OS)
-  flash   [-Path image]      write the OpenAstro image (.img/.img.gz; for
-                             .img.xz use Raspberry Pi Imager, or 7-Zip to
-                             decompress first)
-  restore -Path backup       write a saved stock backup back
+You get a menu:
+  1) Backup  - save the current eMMC (stock ToupTek OS) to a .img.gz + .sha256
+  2) Flash   - write the OpenAstro image (downloads the latest release
+               automatically if not present; needs 7-Zip to decompress .xz)
+  3) Restore - write a saved backup back (return to stock ToupTek)
 
-ALWAYS run 'backup' once before the first 'flash' - that backup is the only
-way back to the stock ToupTek OS.
+Everything else is automatic: rpiboot is installed on first use, the eMMC is
+detected as the disk that newly appears, size-checked (~32 GB), and you
+confirm the disk number before anything is written.
 
-.EXAMPLE
-  .\openastro-flash.ps1 install-rpiboot
-  .\openastro-flash.ps1 backup
-  .\openastro-flash.ps1 flash -Path ..\images\openastro-touptek-stellavita.img
-  .\openastro-flash.ps1 restore -Path .\stellavita-stock-backup-20260818.img.gz
+ALWAYS make a backup before the first flash - the stock ToupTek OS is not
+downloadable anywhere; your backup is the only way back.
+
+Scripting: the menu choices also work as subcommands -
+  .\openastro-flash.ps1 backup  [-Path out.img.gz]
+  .\openastro-flash.ps1 flash   [-Path image.img|.img.gz]
+  .\openastro-flash.ps1 restore [-Path backup.img.gz]
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Position = 0, Mandatory = $true)]
-    [ValidateSet('install-rpiboot', 'backup', 'flash', 'restore')]
+    [Parameter(Position = 0)]
+    [ValidateSet('backup', 'flash', 'restore', 'install-rpiboot')]
     [string]$Command,
     [string]$Path
 )
 
 $ErrorActionPreference = 'Stop'
+$RepoDir   = Split-Path $PSScriptRoot -Parent
+$ImagesDir = Join-Path $RepoDir 'images'
+$ReleaseApi = 'https://api.github.com/repos/open-astro/openastro-touptek-stellavita/releases/latest'
+$ImageName  = 'openastro-touptek-stellavita.img.xz'
 
 function Log($msg) { Write-Host "[flash] $msg" }
 function Fail($msg) { Write-Error "[flash] $msg"; exit 1 }
@@ -45,7 +48,7 @@ function Assert-Admin {
 }
 
 # ------------------------------------------------------------
-# rpiboot
+# rpiboot (installed automatically on first use)
 # ------------------------------------------------------------
 function Find-Rpiboot {
     $candidates = @(
@@ -58,6 +61,9 @@ function Find-Rpiboot {
 
 function Install-Rpiboot {
     if (Find-Rpiboot) { Log "rpiboot already installed: $(Find-Rpiboot)"; return }
+    Write-Host ''
+    Log "rpiboot (Raspberry Pi usbboot) is needed to talk to the StellaVita's eMMC."
+    if ((Read-Host 'Install it now? [Y/n]') -match '^[nN]') { Fail 'rpiboot is required - aborting.' }
     Log 'Fetching the latest rpiboot installer from raspberrypi/usbboot releases...'
     $rel = Invoke-RestMethod 'https://api.github.com/repos/raspberrypi/usbboot/releases/latest'
     $asset = $rel.assets | Where-Object name -like 'rpiboot_setup*.exe' | Select-Object -First 1
@@ -71,11 +77,65 @@ function Install-Rpiboot {
 }
 
 # ------------------------------------------------------------
+# OpenAstro image (downloaded automatically if missing)
+# ------------------------------------------------------------
+function Find-XzTool {
+    foreach ($c in @(
+        (Get-Command xz.exe -ErrorAction SilentlyContinue | ForEach-Object Source),
+        "$env:ProgramFiles\7-Zip\7z.exe",
+        "${env:ProgramFiles(x86)}\7-Zip\7z.exe"
+    )) { if ($c -and (Test-Path $c)) { return $c } }
+    return $null
+}
+
+function Get-OpenAstroImage {
+    # Returns the path to a ready-to-write .img (decompressed).
+    $img = Join-Path $ImagesDir 'openastro-touptek-stellavita.img'
+    if (Test-Path $img) { Log "Using local image: $img"; return $img }
+
+    $xz = Join-Path $ImagesDir $ImageName
+    if (-not (Test-Path $xz)) {
+        Write-Host ''
+        Log 'OpenAstro image not found locally - fetching the latest release...'
+        $rel = Invoke-RestMethod $ReleaseApi
+        $asset = $rel.assets | Where-Object name -eq $ImageName | Select-Object -First 1
+        if (-not $asset) { Fail "could not find $ImageName in the latest GitHub release." }
+        New-Item -ItemType Directory -Force $ImagesDir | Out-Null
+        Log "Downloading $($asset.browser_download_url) (~550 MB)..."
+        Invoke-WebRequest $asset.browser_download_url -OutFile "$xz.part"
+        $shaAsset = $rel.assets | Where-Object name -eq "$ImageName.sha256" | Select-Object -First 1
+        if ($shaAsset) {
+            Invoke-WebRequest $shaAsset.browser_download_url -OutFile "$xz.sha256"
+            Log 'Verifying checksum...'
+            $want = ((Get-Content "$xz.sha256") -split '\s+')[0].ToLower()
+            $got  = (Get-FileHash -Algorithm SHA256 "$xz.part").Hash.ToLower()
+            if ($want -ne $got) { Fail "checksum mismatch on downloaded image - delete $xz.part and retry." }
+            Log 'Checksum OK.'
+        }
+        Move-Item "$xz.part" $xz
+    }
+
+    $tool = Find-XzTool
+    if (-not $tool) {
+        Fail "Windows cannot decompress .img.xz natively. Install 7-Zip (https://www.7-zip.org) and re-run - the script will decompress $xz automatically."
+    }
+    Log "Decompressing $xz (needs ~13 GB free)..."
+    if ($tool -like '*7z.exe') {
+        & $tool e $xz "-o$ImagesDir" -y | Out-Null
+    } else {
+        & $tool -dk $xz
+    }
+    if (-not (Test-Path $img)) { Fail "decompression failed - $img not found." }
+    Log "Image ready: $img"
+    return $img
+}
+
+# ------------------------------------------------------------
 # Device discovery
 # ------------------------------------------------------------
 function Get-EmmcDisk {
+    Install-Rpiboot
     $rpiboot = Find-Rpiboot
-    if (-not $rpiboot) { Fail "rpiboot not installed - run: .\openastro-flash.ps1 install-rpiboot" }
 
     $before = (Get-Disk | ForEach-Object Number)
 
@@ -149,9 +209,15 @@ function Copy-Stream($src, $dst, [long]$total, [string]$verb) {
 # ------------------------------------------------------------
 # Commands
 # ------------------------------------------------------------
+function Get-LatestBackup {
+    Get-ChildItem -Path $ImagesDir -Filter 'stellavita-stock-backup-*.img.gz' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending | Select-Object -First 1
+}
+
 function Invoke-Backup([string]$OutPath) {
     if (-not $OutPath) {
-        $OutPath = Join-Path (Get-Location) ("stellavita-stock-backup-{0:yyyyMMdd}.img.gz" -f (Get-Date))
+        New-Item -ItemType Directory -Force $ImagesDir | Out-Null
+        $OutPath = Join-Path $ImagesDir ("stellavita-stock-backup-{0:yyyyMMdd}.img.gz" -f (Get-Date))
     }
     if (Test-Path $OutPath) { Fail "$OutPath already exists - refusing to overwrite a backup." }
     $disk = Get-EmmcDisk
@@ -168,10 +234,9 @@ function Invoke-Backup([string]$OutPath) {
 }
 
 function Invoke-Write([string]$ImagePath, [string]$Label) {
-    if (-not $ImagePath) { Fail "Pass the image with -Path" }
     if (-not (Test-Path $ImagePath)) { Fail "image not found: $ImagePath" }
     if ($ImagePath -like '*.xz') {
-        Fail '.img.xz is not supported natively on Windows - decompress with 7-Zip first, or flash with Raspberry Pi Imager.'
+        Fail '.img.xz cannot be written directly - install 7-Zip and let the flash option decompress it, or decompress manually first.'
     }
     $disk = Get-EmmcDisk
 
@@ -194,23 +259,64 @@ function Invoke-Write([string]$ImagePath, [string]$Label) {
     finally { $raw.Dispose(); $src.Dispose() }
 
     Set-Disk -Number $disk.Number -IsOffline $false -ErrorAction SilentlyContinue
-    Log "$Label written. Disconnect USB, restore normal boot, and power-cycle."
+    Log "$Label written. Disconnect USB, remove the jumper, and power-cycle."
+}
+
+function Invoke-Flash([string]$ImagePath) {
+    if (-not $ImagePath) { $ImagePath = Get-OpenAstroImage }
+    Write-Host ''
+    Write-Host 'This OVERWRITES the eMMC with the OpenAstro image.'
+    if (-not (Get-LatestBackup)) {
+        Write-Host "No stock backup found in $ImagesDir - the stock ToupTek OS is NOT"
+        Write-Host 'downloadable anywhere; a backup is the only way back to stock.'
+        if ((Read-Host 'Make a backup first? [Y/n]') -notmatch '^[nN]') {
+            Invoke-Backup $null
+            Write-Host ''
+            Write-Host 'Backup done - now the flash. Unplug the USB cable, then plug it'
+            Write-Host 'back in (keep the jumper shorted) so the board can re-enter boot mode.'
+        }
+    }
+    if ((Read-Host 'Continue with the flash? [y/N]') -notmatch '^[yY]$') { exit 1 }
+    Invoke-Write $ImagePath 'OpenAstro image'
+}
+
+function Invoke-Restore([string]$ImagePath) {
+    if (-not $ImagePath) {
+        $b = Get-LatestBackup
+        if (-not $b) { Fail "no backup found in $ImagesDir - pass one with -Path" }
+        $ImagePath = $b.FullName
+    }
+    Write-Host ''
+    Write-Host 'This OVERWRITES the eMMC with the stock ToupTek backup:'
+    Write-Host "  $ImagePath"
+    if ((Read-Host 'Continue? [y/N]') -notmatch '^[yY]$') { exit 1 }
+    Invoke-Write $ImagePath 'stock ToupTek backup'
+}
+
+function Show-Menu {
+    Write-Host ''
+    Write-Host 'OpenAstro StellaVita flash tool'
+    Write-Host '==============================='
+    Write-Host ''
+    Write-Host '  1) Backup  - save the stock ToupTek OS from the eMMC (do this first!)'
+    Write-Host '  2) Flash   - write the OpenAstro image to the eMMC'
+    Write-Host '  3) Restore - write a stock backup back to the eMMC'
+    Write-Host '  q) Quit'
+    Write-Host ''
+    switch (Read-Host 'Choose [1/2/3/q]') {
+        '1' { Invoke-Backup $Path }
+        '2' { Invoke-Flash $Path }
+        '3' { Invoke-Restore $Path }
+        'q' { exit 0 }
+        default { Fail 'invalid choice' }
+    }
 }
 
 Assert-Admin
 switch ($Command) {
     'install-rpiboot' { Install-Rpiboot }
     'backup'          { Invoke-Backup $Path }
-    'flash' {
-        if (-not $Path) { $Path = Join-Path $PSScriptRoot '..\images\openastro-touptek-stellavita.img' }
-        Write-Host 'This OVERWRITES the eMMC with the OpenAstro image.'
-        Write-Host "Run '.\openastro-flash.ps1 backup' first if you have not - it is the only way back to stock."
-        if ((Read-Host 'Continue? [y/N]') -notmatch '^[yY]$') { exit 1 }
-        Invoke-Write $Path 'OpenAstro image'
-    }
-    'restore' {
-        Write-Host "This OVERWRITES the eMMC with the stock ToupTek backup: $Path"
-        if ((Read-Host 'Continue? [y/N]') -notmatch '^[yY]$') { exit 1 }
-        Invoke-Write $Path 'stock ToupTek backup'
-    }
+    'flash'           { Invoke-Flash $Path }
+    'restore'         { Invoke-Restore $Path }
+    default           { Show-Menu }
 }

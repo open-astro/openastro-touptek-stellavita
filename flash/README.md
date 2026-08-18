@@ -19,23 +19,36 @@ OS**, flash the OpenAstro image, and restore stock later if you want.
 | Linux, macOS | `openastro-flash.sh` |
 | Windows | `openastro-flash.ps1` (elevated PowerShell) |
 
-## Workflow
+## Usage
+
+Just run the script with no arguments and pick from the menu:
 
 ```bash
 # Linux / macOS
-./openastro-flash.sh install-rpiboot        # one-time
-./openastro-flash.sh backup                 # -> images/stellavita-stock-backup-YYYYMMDD.img.xz
-./openastro-flash.sh flash                  # writes images/openastro-touptek-stellavita.img.xz
-./openastro-flash.sh restore <backup.img.xz>  # back to stock
+./openastro-flash.sh
 ```
 
 ```powershell
 # Windows (Administrator PowerShell)
-.\openastro-flash.ps1 install-rpiboot
-.\openastro-flash.ps1 backup
-.\openastro-flash.ps1 flash -Path ..\images\openastro-touptek-stellavita.img
-.\openastro-flash.ps1 restore -Path .\stellavita-stock-backup-20260818.img.gz
+.\openastro-flash.ps1
 ```
+
+```
+  1) Backup  - save the stock ToupTek OS from the eMMC (do this first!)
+  2) Flash   - write the OpenAstro image to the eMMC
+  3) Restore - write a stock backup back to the eMMC
+```
+
+Everything else is automatic:
+
+- **rpiboot** is installed on first use (you're asked before it installs).
+- **Flash** downloads the latest OpenAstro release image (with checksum
+  verification) into `images/` if it isn't there already, and offers to make
+  a stock backup first if none exists.
+- **Restore** picks up the newest backup in `images/` automatically.
+
+For scripting, the menu choices also work as subcommands
+(`backup [out]`, `flash [image]`, `restore [backup]`).
 
 Each backup/flash/restore run walks you through the same steps:
 
@@ -64,12 +77,13 @@ Each backup/flash/restore run walks you through the same steps:
   script installs deps via apt). Backups are `.img.xz`.
 - **macOS**: rpiboot comes from Homebrew (source-build fallback included).
   Uses `/dev/rdiskN` raw nodes for speed. Backups are `.img.xz`.
-- **Windows**: `install-rpiboot` downloads the official installer (includes
-  the boot driver) from the usbboot releases. Backups are `.img.gz` (native
-  .NET gzip; no xz on stock Windows). To flash the released
-  `openastro-touptek-stellavita.img.xz`, either decompress it with 7-Zip
-  first or use [Raspberry Pi Imager](https://www.raspberrypi.com/software/)
-  pointed at the disk rpiboot exposes.
+- **Windows**: rpiboot comes from the official installer (includes the boot
+  driver) in the usbboot releases. Backups are `.img.gz` (native .NET gzip;
+  no xz on stock Windows). Flashing the released `.img.xz` needs
+  [7-Zip](https://www.7-zip.org) installed - the script finds it and
+  decompresses automatically (or use
+  [Raspberry Pi Imager](https://www.raspberrypi.com/software/) pointed at
+  the disk rpiboot exposes).
 
 ## Restoring stock ToupTek
 

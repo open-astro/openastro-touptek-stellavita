@@ -1,45 +1,47 @@
 #!/bin/bash
 # OpenAstro StellaVita flash tool (Linux + macOS).
 #
-# The StellaVita is a Raspberry Pi CM4 with a 32 GB eMMC - there is no SD
-# card to pull. The eMMC is exposed as a USB mass-storage disk via rpiboot
-# (Raspberry Pi usbboot) with the board in USB device-boot mode. This script
-# wraps the whole workflow:
+# Just run it:   ./openastro-flash.sh
 #
-#   install-rpiboot            build/install rpiboot for this OS
-#   backup  [out.img.xz]       save the current eMMC (stock ToupTek OS) to a
-#                              compressed image + .sha256
-#   flash   [openastro.img.xz] write the OpenAstro image to the eMMC
-#   restore <backup.img.xz>    write a saved backup back (return to stock)
+# You get a menu:
+#   1) Backup   - save the current eMMC (stock ToupTek OS) to a compressed
+#                 image + .sha256 in images/
+#   2) Flash    - write the OpenAstro image to the eMMC (downloads the
+#                 latest release image automatically if not present)
+#   3) Restore  - write a saved backup back (return to stock ToupTek)
 #
-# backup/flash/restore all: run rpiboot, wait for the eMMC to appear as a
-# USB disk (RPi-MSD), confirm the target device with you, then read/write.
+# Everything else is automatic: rpiboot is installed on first use, the eMMC
+# is detected as the disk that newly appears (never guessed), size-checked
+# (~32 GB), and you confirm the device before anything is written.
 #
-# ALWAYS run `backup` once before the first `flash` - that backup is the
-# only way back to the stock ToupTek OS.
+# ALWAYS make a backup before the first flash - the stock ToupTek OS is not
+# downloadable anywhere; your backup is the only way back.
+#
+# Scripting: the menu choices also work as subcommands -
+#   ./openastro-flash.sh backup  [out.img.xz]
+#   ./openastro-flash.sh flash   [image.img.xz]
+#   ./openastro-flash.sh restore [backup.img.xz]
 set -euo pipefail
 
 REPODIR="$(cd "$(dirname "$0")/.." && pwd)"
+IMAGESDIR="$REPODIR/images"
 OS="$(uname -s)"
+RELEASE_API="https://api.github.com/repos/open-astro/openastro-touptek-stellavita/releases/latest"
+IMAGE_NAME="openastro-touptek-stellavita.img.xz"
 
 log()  { echo "[flash] $*"; }
 die()  { echo "[flash] ERROR: $*" >&2; exit 1; }
-
-usage() {
-    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
-    exit 1
-}
-
 need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required - $2"; }
 
 # ------------------------------------------------------------
-# rpiboot
+# rpiboot (installed automatically on first use)
 # ------------------------------------------------------------
-install_rpiboot() {
-    if command -v rpiboot >/dev/null 2>&1; then
-        log "rpiboot already installed: $(command -v rpiboot)"
-        return 0
-    fi
+ensure_rpiboot() {
+    command -v rpiboot >/dev/null 2>&1 && return 0
+    echo
+    log "rpiboot (Raspberry Pi usbboot) is needed to talk to the StellaVita's eMMC."
+    read -r -p "Install it now? [Y/n] " a
+    case "$a" in [nN]*) die "rpiboot is required - aborting." ;; esac
     case "$OS" in
     Linux)
         log "Installing build deps (sudo apt-get)..."
@@ -73,6 +75,36 @@ install_rpiboot() {
 }
 
 # ------------------------------------------------------------
+# OpenAstro image (downloaded automatically if missing)
+# ------------------------------------------------------------
+fetch_openastro_image() {
+    IMAGE="$IMAGESDIR/$IMAGE_NAME"
+    [ -f "$IMAGE" ] && { log "Using local image: $IMAGE"; return 0; }
+    need curl "install curl"
+    echo
+    log "OpenAstro image not found locally - fetching the latest release..."
+    local url sha_url
+    url="$(curl -fsSL "$RELEASE_API" | grep -o "https://[^\"]*/$IMAGE_NAME" | head -1)"
+    [ -n "$url" ] || die "could not find $IMAGE_NAME in the latest GitHub release."
+    sha_url="$(curl -fsSL "$RELEASE_API" | grep -o "https://[^\"]*/$IMAGE_NAME.sha256" | head -1)"
+    mkdir -p "$IMAGESDIR"
+    log "Downloading $url (~550 MB)..."
+    curl -fL --progress-bar -o "$IMAGE.part" "$url"
+    if [ -n "$sha_url" ]; then
+        curl -fsSL -o "$IMAGE.sha256" "$sha_url"
+        log "Verifying checksum..."
+        local want got
+        want="$(awk '{print $1}' "$IMAGE.sha256")"
+        if [ "$OS" = Darwin ]; then got="$(shasum -a 256 "$IMAGE.part" | awk '{print $1}')"
+        else got="$(sha256sum "$IMAGE.part" | awk '{print $1}')"; fi
+        [ "$want" = "$got" ] || die "checksum mismatch on downloaded image - delete $IMAGE.part and retry."
+        log "Checksum OK."
+    fi
+    mv "$IMAGE.part" "$IMAGE"
+    log "Image saved to $IMAGE"
+}
+
+# ------------------------------------------------------------
 # Device discovery
 # ------------------------------------------------------------
 # Snapshot of disks that exist BEFORE rpiboot, so the eMMC is identified as
@@ -85,7 +117,7 @@ list_disks() {
 }
 
 run_rpiboot_and_find_device() {
-    command -v rpiboot >/dev/null 2>&1 || die "rpiboot not found - run: $0 install-rpiboot"
+    ensure_rpiboot
     local before after new d
     before="$(list_disks)"
 
@@ -155,8 +187,11 @@ raw_device() {
 # ------------------------------------------------------------
 # Commands
 # ------------------------------------------------------------
+have_backup() { compgen -G "$IMAGESDIR/stellavita-stock-backup-*.img.xz" >/dev/null 2>&1; }
+latest_backup() { ls -t "$IMAGESDIR"/stellavita-stock-backup-*.img.xz 2>/dev/null | head -1; }
+
 cmd_backup() {
-    local out="${1:-$REPODIR/images/stellavita-stock-backup-$(date +%Y%m%d).img.xz}"
+    local out="${1:-$IMAGESDIR/stellavita-stock-backup-$(date +%Y%m%d).img.xz}"
     need xz "install xz-utils"
     [ -e "$out" ] && die "$out already exists - refusing to overwrite a backup."
     run_rpiboot_and_find_device
@@ -196,28 +231,72 @@ write_image() {
     fi
     sync
     case "$OS" in Darwin) diskutil eject "$DEVICE" || true ;; esac
-    log "$label written. Disconnect USB, restore normal boot, and power-cycle."
+    log "$label written. Disconnect USB, remove the jumper, and power-cycle."
 }
 
 cmd_flash() {
-    local img="${1:-$REPODIR/images/openastro-touptek-stellavita.img.xz}"
+    local img="${1:-}"
+    if [ -z "$img" ]; then
+        fetch_openastro_image
+        img="$IMAGE"
+    fi
+    echo
     echo "This OVERWRITES the eMMC with the OpenAstro image."
-    echo "Run '$0 backup' first if you have not - it is the only way back to stock."
-    read -r -p "Continue? [y/N] " a; case "$a" in [yY]) ;; *) exit 1 ;; esac
+    if ! have_backup; then
+        echo "No stock backup found in $IMAGESDIR - the stock ToupTek OS is NOT"
+        echo "downloadable anywhere; a backup is the only way back to stock."
+        read -r -p "Make a backup first? [Y/n] " a
+        case "$a" in [nN]*) ;; *)
+            cmd_backup
+            echo
+            echo "Backup done - now the flash. Unplug the USB cable, then plug it"
+            echo "back in (keep the jumper shorted) so the board can re-enter boot mode."
+            ;;
+        esac
+    fi
+    read -r -p "Continue with the flash? [y/N] " a; case "$a" in [yY]) ;; *) exit 1 ;; esac
     write_image "$img" "OpenAstro image"
 }
 
 cmd_restore() {
-    local img="${1:?usage: $0 restore <backup.img.xz>}"
-    echo "This OVERWRITES the eMMC with the stock ToupTek backup: $img"
+    local img="${1:-}"
+    if [ -z "$img" ]; then
+        img="$(latest_backup || true)"
+        [ -n "$img" ] || die "no backup found in $IMAGESDIR - pass one: $0 restore <backup.img.xz>"
+    fi
+    echo
+    echo "This OVERWRITES the eMMC with the stock ToupTek backup:"
+    echo "  $img"
     read -r -p "Continue? [y/N] " a; case "$a" in [yY]) ;; *) exit 1 ;; esac
     write_image "$img" "stock ToupTek backup"
 }
 
+menu() {
+    echo
+    echo "OpenAstro StellaVita flash tool"
+    echo "==============================="
+    echo
+    echo "  1) Backup  - save the stock ToupTek OS from the eMMC (do this first!)"
+    echo "  2) Flash   - write the OpenAstro image to the eMMC"
+    echo "  3) Restore - write a stock backup back to the eMMC"
+    echo "  q) Quit"
+    echo
+    read -r -p "Choose [1/2/3/q]: " choice
+    case "$choice" in
+    1) cmd_backup ;;
+    2) cmd_flash ;;
+    3) cmd_restore ;;
+    q|Q) exit 0 ;;
+    *) die "invalid choice '$choice'" ;;
+    esac
+}
+
 case "${1:-}" in
-install-rpiboot) install_rpiboot ;;
+"")              menu ;;
 backup)          shift; cmd_backup "$@" ;;
 flash)           shift; cmd_flash "$@" ;;
 restore)         shift; cmd_restore "$@" ;;
-*)               usage ;;
+install-rpiboot) ensure_rpiboot ;;
+-h|--help|help)  sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//' ;;
+*)               die "unknown command '${1}' - run with no arguments for the menu." ;;
 esac
