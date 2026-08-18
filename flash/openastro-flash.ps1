@@ -49,7 +49,7 @@ function Assert-Admin {
 # ------------------------------------------------------------
 function Find-Rpiboot {
     $candidates = @(
-        "$env:ProgramFiles(x86)\Raspberry Pi\rpiboot.exe",
+        "${env:ProgramFiles(x86)}\Raspberry Pi\rpiboot.exe",
         "$env:ProgramFiles\Raspberry Pi\rpiboot.exe"
     ) + (Get-Command rpiboot.exe -ErrorAction SilentlyContinue | ForEach-Object Source)
     foreach ($c in $candidates) { if ($c -and (Test-Path $c)) { return $c } }
