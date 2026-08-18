@@ -1,0 +1,54 @@
+#!/bin/bash
+# 1.boot automount
+# The first time to mount, delay 10 seconds
+TMP_LOG=/dev/null #change this to any file
+TMP_SD_FILE="/tmp/sd"
+DFT_MOUNT_POINT="/media/pi/sd/"
+sudo mkdir -p $DFT_MOUNT_POINT
+if [ ! -f "$TMP_SD_FILE" ]; then
+    echo "boot mount" >> $TMP_LOG
+    sleep 10
+    touch "$TMP_SD_FILE"
+fi
+# 2.Check initialize
+# Check whether the SD card is initialized. If not, initialize it
+# Checking if /dev/sda1 exists
+if [ -b "/dev/sda" ]; then
+    echo "/dev/sda exists."  >> $TMP_LOG
+    # Checking for a valid file system on /dev/sda1
+    FS_TYPE=$(sudo blkid -o value -s TYPE /dev/sda1)
+    if [ -n "$FS_TYPE" ]; then
+        echo "SD card /dev/sda1 is initialized with file system type: $FS_TYPE." >> $TMP_LOG
+    else
+        # Check whether SD card exists
+        if sudo fdisk -l | grep -q 'sda'; then
+        echo "SD card /dev/sda1 is not initialized. No file system detected." >> $TMP_LOG
+        # Initialize SD card
+        echo "Initialize SD card." >> $TMP_LOG
+sudo fdisk /dev/sda << EOF
+n
+p
+1
+
+y
+w
+EOF
+        sudo mkfs.vfat /dev/sda1
+        fi
+    fi
+else
+    echo "/dev/sda does not exist. Please check the SD card connection."  >> $TMP_LOG
+fi
+
+# 3.mount/umount
+# Handle changes triggered by insertion and removal
+# Check whether /dev/sda1 exists
+if sudo fdisk -l | grep -q 'sda1'; then
+    echo "Attempting to mount /dev/sda1" >> $TMP_LOG
+    sudo mount /dev/sda1 "$DFT_MOUNT_POINT"
+else
+    echo "Attempting to unmount /dev/sda1" >> $TMP_LOG
+    sudo umount -l /dev/sda1
+fi
+
+sync

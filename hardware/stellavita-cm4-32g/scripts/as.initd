@@ -1,0 +1,39 @@
+#!/bin/bash
+#/etc/init.d/as
+
+### BEGIN INIT INFO
+# Provides: as
+# Required-Start: $remote_fs $syslog
+# Required-Stop: $remote_fs $syslog
+# Default-Start: 2 3 4 5
+# Default-Stop: 0 1 6
+# Short-Description: as
+# Description: This service is used to start as_daemon & as_core
+### END INIT INFO
+
+sleep 12
+source /etc/profile
+ASDIR=/usr/local/astrostation/bin
+case "$1" in
+  start)
+    echo "start as"
+    sudo killall -9 as_daemon
+    sudo killall -9 as_core
+    sudo pkill indiserver
+    if [ -f $ASDIR/as_daemon ]; then
+      sudo chmod +x $ASDIR/as_daemon
+      sudo $ASDIR/as_daemon &
+    fi
+    ;;
+  stop)
+    echo "stop as"
+    sudo killall -9 as_daemon
+    sudo killall -9 as_core
+    sudo pkill indiserver
+    ;;
+  *)
+    echo "Usage: service as start|stop"
+    exit 1
+    ;;
+esac
+exit 0

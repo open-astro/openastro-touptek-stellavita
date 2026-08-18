@@ -1,0 +1,92 @@
+#!/bin/bash
+HOSTAPDIR=/usr/local/astrostation/hostap
+BEEP=/usr/local/astrostation/bin/as_beep
+BEIDGE_FILE=/usr/local/astrostation/bin/bridge_ap
+OPENFILE=/tmp/as_first_apon
+APFILE=/tmp/as_apon
+DNSFILE=/etc/dnsmasq.d/as_dns.conf
+isaswlan0="aswlan0"
+WIFI_MODEL="88x2BU@RTL"
+DSTWLAN=
+SRCWLAN=
+if [ ! -f "$OPENFILE" ];then
+  sleep 10
+  sudo touch $OPENFILE
+fi
+
+USB_INFO=$(lsusb | grep "c820")
+if [ ! -z "$USB_INFO" ];then
+  WIFI_MODEL="8821CU@RTL"
+fi
+USB_INFO=$(lsusb | grep "c811")
+if [ ! -z "$USB_INFO" ];then
+  WIFI_MODEL="8821CU@RTL"
+fi
+
+
+# 获取包含"$WIFI_MODEL"关键字的所有网卡信息
+network_info=$(iwconfig 2>/dev/null | grep $WIFI_MODEL)
+counter=1
+while IFS= read -r line; do
+  network_name=$(echo "$line" | awk '{print $1}')
+  var_name="network_$counter"
+  declare $var_name="$network_name"
+  # echo " $var_name : ${!var_name}"
+  ((counter++))
+done <<< "$network_info"
+WLAN_ONE=$network_1
+WLAN_TWO=$network_2
+
+## 循环判断网卡名称是否包含aswlan0，如果包含DSTWLAN赋值为aswlan0, 不包含则默认配置为wlan0
+if [[ $WLAN_ONE == $isaswlan0 || $WLAN_TWO == $isaswlan0 ]];then
+  DSTWLAN=$isaswlan0
+  SRCWLAN=wlan0
+else
+  DSTWLAN=wlan0
+  SRCWLAN=$isaswlan0
+  # 避免有wpa配置没被清空
+  killall wpa_supplicant
+  ifconfig wlan0 up
+fi
+
+dnswlan=$(cat "$DNSFILE" | grep -m 1 interface=$DSTWLAN)
+haswlan=$(cat "$HOSTAPDIR"/as.conf | grep -w interface=$DSTWLAN)
+## 上面为获取网卡名称
+if [ -z "$dnswlan" ] || [ -z "$haswlan" ];then
+  sudo sed -i 's/^interface=.*/interface='$DSTWLAN'/' "$HOSTAPDIR/as_5g.conf"
+  sudo sed -i 's/^interface=.*/interface='$DSTWLAN'/' "$HOSTAPDIR/as_2.4g.conf"
+  sudo sed -i '/^[^#]*interface/s/interface .*/interface '$DSTWLAN'/' /etc/dhcpcd.conf
+  sudo sed -i "s/interface=[^ ]*/interface=$DSTWLAN/"  "$DNSFILE"
+  sudo sed -i "s/interface=lo,[^ ]*/interface=lo,$DSTWLAN/" "$DNSFILE"
+  sudo sed -i "s/no-dhcp-interface=.*/no-dhcp-interface=lo,$SRCWLAN,eth0/" "$DNSFILE"
+  sync
+fi
+sleep 1
+sudo systemctl restart dnsmasq.service
+sleep 1
+sudo systemctl restart hostapd.service
+declare -i count=1
+while (( count<10 ))
+do
+  isHostRunning=$(sudo systemctl status hostapd.service | grep running)
+  isDnsRunning=$(sudo systemctl status dnsmasq.service | grep running)
+  if [[ ( ( ! -z $isHostRunning) && ( ! -z $isDnsRunning ) ) ]];then
+    break;
+  fi
+  sleep 1
+  sudo systemctl restart dnsmasq.service
+  sleep 1
+  sudo systemctl restart hostapd.service
+  count+=1
+done
+if [[ ! ( ( ! -f "$APFILE" ) && ( ! -z $haswlan1 ) ) ]];then
+  if [[ ! ( ( ! -z $1 ) && ( $1 == "mute") ) ]];then
+    sleep 1
+    python $BEEP 12 1000 40 && python $BEEP 12 1000 40
+  fi
+fi
+if [ ! -f "$APFILE" ];then
+  sudo touch $APFILE
+fi
+
+$BEIDGE_FILE $DSTWLAN

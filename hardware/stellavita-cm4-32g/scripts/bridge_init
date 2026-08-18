@@ -1,0 +1,29 @@
+#!/bin/bash
+
+DST=aswlan1
+WLAN_SWITCH=$1
+declare -i count=1
+
+if [ $WLAN_SWITCH == "1" ];then
+  while (( count<100 ))
+  do
+    is_wpa=$(ps -elf | grep wpa | grep $DST)
+    if [ ! -z "$is_wpa" ];then
+      /usr/local/astrostation/bin/wifi_ap.sh reconnect
+      break
+    fi
+    sleep 0.2
+    count+=1
+  done
+else
+  while (( count<100 ))
+  do
+    is_wpa=$(ps -elf | grep wpa | grep $DST)
+    if [ ! -z "$is_wpa" ];then
+      /usr/local/astrostation/bin/wifi_ap.sh disconnect
+      break
+    fi
+    sleep 0.2
+    count+=1
+  done
+fi

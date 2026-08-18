@@ -1,0 +1,46 @@
+#!/bin/bash
+
+DST=$1
+WIFI_BRIDGINT_INIT=/usr/local/astrostation/bin/bridge_init 
+WIFI_GLOBAL_FLIE=/usr/local/astrostation/bin/wifi_flag.py
+WIFI_BRIDGINT=WifiBridgeOn
+
+if [ "$(cat /proc/sys/net/ipv4/ip_forward)" != "1" ]; then
+  echo 1 > /proc/sys/net/ipv4/ip_forward
+fi
+
+WLAN_SWITCH=$(python3 $WIFI_GLOBAL_FLIE $WIFI_BRIDGINT | tee)
+if [ -z $WLAN_SWITCH ];then
+  WLAN_SWITCH=0
+fi
+
+iptables -F
+iptables -X
+iptables -t nat -F
+iptables -t nat -X
+iptables -t nat -A POSTROUTING -o aswlan1 -j MASQUERADE
+iptables -A FORWARD -i $DST -o aswlan1 -j ACCEPT
+iptables -A FORWARD -o $DST -m conntrack --ctstate ESTABLISHED,RELATED -i aswlan1 -j ACCEPT
+iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+iptables -A FORWARD -i $DST -o eth0 -j ACCEPT
+iptables -A FORWARD -o $DST -m conntrack --ctstate ESTABLISHED,RELATED -i eth0 -j ACCEPT
+
+## 默认配置路由表,避免连接的WIFI与AP网卡的网段相同
+if ! ip rule show | grep -q "from 10.0.10.1 lookup 1"; then
+  ip rule add from 10.0.10.1 table 1
+fi
+
+if ! ip route show table 1 | grep -q "default dev $DST"; then
+  ip route del default table 1
+  ip route add default dev $DST table 1
+fi
+
+if [ $DST != "wlan0" ];then
+  # 避免外置网卡驱动与内置网卡冲突
+  ifconfig wlan0 down
+fi
+
+# 将初始化操作移至单独脚本,避免udev服务卡死
+$WIFI_BRIDGINT_INIT $WLAN_SWITCH &
+
+sync

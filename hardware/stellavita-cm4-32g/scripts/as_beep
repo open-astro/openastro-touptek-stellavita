@@ -1,0 +1,23 @@
+#!/usr/bin/python
+# encoding:utf-8
+# example: beep.py 12 1000 200
+import RPi.GPIO as GPIO
+import time
+import sys
+
+gpioNum = int(sys.argv[1])
+audioHZ = int(sys.argv[2])
+audioPeriod = int(sys.argv[3])
+   
+def beep(hz,period):
+    for i in range(period):
+        GPIO.output(gpioNum,GPIO.LOW) 
+        time.sleep(1.0/hz)
+        GPIO.output(gpioNum,GPIO.HIGH) 
+        time.sleep(1.0/hz) 
+        
+GPIO.setwarnings(False)
+GPIO.setmode(GPIO.BCM) 
+GPIO.setup(gpioNum,GPIO.OUT,initial=GPIO.HIGH)
+beep(audioHZ, audioPeriod)
+GPIO.cleanup()
