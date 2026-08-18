@@ -48,14 +48,19 @@ stock backup later if you want.
 
 ```bash
 cd flash
-./openastro-flash.sh install-rpiboot   # one-time
-./openastro-flash.sh backup            # save the stock ToupTek OS - do this first!
-./openastro-flash.sh flash             # write the OpenAstro image
-./openastro-flash.sh restore <backup>  # back to stock, any time
+./openastro-flash.sh
 ```
 
-(Windows: `flash\openastro-flash.ps1`, same commands - see
-[`flash/README.md`](flash/README.md).)
+```
+  1) Backup  - save the stock ToupTek OS from the eMMC (do this first!)
+  2) Flash   - write the OpenAstro image to the eMMC
+  3) Restore - write a stock backup back to the eMMC
+```
+
+Everything else is automatic: rpiboot installs on first use, and Flash
+downloads the latest release image if it isn't already in `images/`.
+(Windows: `flash\openastro-flash.ps1` in an Administrator PowerShell, same
+menu - see [`flash/README.md`](flash/README.md).)
 
 Then power on. The 12V outputs and USB ports come up with the board.
 
