@@ -48,7 +48,7 @@ Each backup/flash/restore run walks you through the same steps:
    Enter, then rpiboot pushes the mass-storage gadget to the CM4 and the
    eMMC appears as a USB disk.
 
-   <img src="https://www.openastro.net/img/sbc/de035a79-7781-48b7-9d2b-e7f67dc5d166.webp"
+   <img src="nrpiboot-jumper.webp"
         alt="StellaVita carrier board with the nRPIBOOT pads next to the SD-card slot shorted by a jumper wire and the USB-C cable connected"
         width="520">
 2. **Device safety checks** - the script identifies the eMMC as the disk
