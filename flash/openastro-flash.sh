@@ -92,7 +92,9 @@ run_rpiboot_and_find_device() {
     echo
     echo "Put the StellaVita in USB device-boot mode now:"
     echo "  1. Make sure the StellaVita is unplugged (no DC power)."
-    echo "  2. Short the nRPIBOOT pins with a jumper (keep them shorted)."
+    echo "  2. Open the case and short the two nRPIBOOT pads next to the"
+    echo "     SD-card slot with a jumper wire (keep them shorted). Photo:"
+    echo "     https://www.openastro.net/img/sbc/de035a79-7781-48b7-9d2b-e7f67dc5d166.webp"
     echo "  3. Connect a USB-A (computer) to USB-C (StellaVita) data cable."
     echo "     The board powers up over USB - do NOT connect DC power."
     echo

@@ -39,20 +39,24 @@ OS**, flash the OpenAstro image, and restore stock later if you want.
 
 Each backup/flash/restore run walks you through the same steps:
 
-1. **Enter USB device-boot mode** - with the StellaVita unplugged, short the
-   nRPIBOOT pins with a jumper, then connect a **USB-A (computer) to USB-C
+1. **Enter USB device-boot mode** - with the StellaVita unplugged, open the
+   case (back cover off the `Astro_Station_V101` carrier board) and short
+   the two nRPIBOOT pads **next to the SD-card slot** with a jumper wire,
+   as in the photo below. Then connect a **USB-A (computer) to USB-C
    (StellaVita)** data cable. The board powers up over USB - no DC power
    needed (or wanted). The script pauses here and waits for you to press
    Enter, then rpiboot pushes the mass-storage gadget to the CM4 and the
    eMMC appears as a USB disk.
+
+   <img src="https://www.openastro.net/img/sbc/de035a79-7781-48b7-9d2b-e7f67dc5d166.webp"
+        alt="StellaVita carrier board with the nRPIBOOT pads next to the SD-card slot shorted by a jumper wire and the USB-C cable connected"
+        width="520">
 2. **Device safety checks** - the script identifies the eMMC as the disk
    that *newly appeared* (never guessed), refuses anything that isn't
    ~32 GB, and makes you re-type the device before touching it.
 3. **Read or write**, with progress, checksums for backups, and a final
    sync/eject.
 
-> **TODO (hardware):** photograph the nRPIBOOT pin location on the
-> StellaVita carrier board for this README.
 
 ## Notes per OS
 
