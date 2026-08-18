@@ -39,23 +39,25 @@ a running StellaVita, with its original configs and scripts - lives in
 
 ## Install
 
-### 1. Download + flash
-
-Grab the latest `openastro-touptek-stellavita.img.xz` from the
-[Releases](../../releases) page and flash it with
-[Raspberry Pi Imager](https://www.raspberrypi.com/software/),
-[balenaEtcher](https://etcher.balena.io/), or `dd`:
+The StellaVita has **no SD card** - the OS lives on the CM4's 32 GB eMMC,
+reached over USB with [rpiboot](https://github.com/raspberrypi/usbboot). The
+[`flash/`](flash/) scripts (Linux, macOS, Windows) handle the whole
+workflow: install rpiboot, **back up the stock ToupTek OS** (your only way
+back to stock - do this first), flash the OpenAstro image, and restore the
+stock backup later if you want.
 
 ```bash
-xzcat openastro-touptek-stellavita.img.xz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+cd flash
+./openastro-flash.sh install-rpiboot   # one-time
+./openastro-flash.sh backup            # save the stock ToupTek OS - do this first!
+./openastro-flash.sh flash             # write the OpenAstro image
+./openastro-flash.sh restore <backup>  # back to stock, any time
 ```
 
-(Use Imager's "No customisation" option - credentials and WiFi are already
-baked in.)
+(Windows: `flash\openastro-flash.ps1`, same commands - see
+[`flash/README.md`](flash/README.md).)
 
-### 2. Boot
-
-Power on. The 12V outputs and USB ports come up with the board.
+Then power on. The 12V outputs and USB ports come up with the board.
 
 ## First boot defaults
 
