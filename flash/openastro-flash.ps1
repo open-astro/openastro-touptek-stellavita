@@ -81,10 +81,12 @@ function Get-EmmcDisk {
 
     Write-Host ''
     Write-Host 'Put the StellaVita in USB device-boot mode now:'
-    Write-Host '  1. Disconnect DC power from the StellaVita.'
-    Write-Host '  2. Connect the StellaVita''s service USB port to this computer.'
-    Write-Host '  3. Power the StellaVita on.'
+    Write-Host '  1. Make sure the StellaVita is unplugged (no DC power).'
+    Write-Host '  2. Short the nRPIBOOT pins with a jumper (keep them shorted).'
+    Write-Host '  3. Connect a USB-A (computer) to USB-C (StellaVita) data cable.'
+    Write-Host '     The board powers up over USB - do NOT connect DC power.'
     Write-Host ''
+    Read-Host 'Press Enter when the pins are shorted and the USB cable is connected' | Out-Null
     Log 'Running rpiboot (waits for the CM4)...'
     Start-Process -FilePath $rpiboot -Wait -NoNewWindow
 

@@ -91,10 +91,12 @@ run_rpiboot_and_find_device() {
 
     echo
     echo "Put the StellaVita in USB device-boot mode now:"
-    echo "  1. Disconnect DC power from the StellaVita."
-    echo "  2. Connect the StellaVita's service USB port to this computer."
-    echo "  3. Power the StellaVita on."
+    echo "  1. Make sure the StellaVita is unplugged (no DC power)."
+    echo "  2. Short the nRPIBOOT pins with a jumper (keep them shorted)."
+    echo "  3. Connect a USB-A (computer) to USB-C (StellaVita) data cable."
+    echo "     The board powers up over USB - do NOT connect DC power."
     echo
+    read -r -p "Press Enter when the pins are shorted and the USB cable is connected... " _
     log "Running rpiboot (waits for the CM4)..."
     # The mass-storage gadget exports the eMMC as a USB disk; -d picks the
     # gadget directory when rpiboot was built from source.
