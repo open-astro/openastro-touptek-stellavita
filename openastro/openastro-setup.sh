@@ -49,8 +49,10 @@ log() { echo "[openastro] $*"; }
 log "Installing packages..."
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+# python3-rpi-lgpio: RPi.GPIO-compatible API on Trixie, for the buzzer.
 apt-get install -y -qq \
     network-manager dnsmasq-base nftables iw wireless-regdb \
+    python3-rpi-lgpio \
     >/dev/null
 
 # ============================================================
@@ -74,6 +76,15 @@ else
     exit 1
 fi
 
+# The StellaVita's internal USB 2.0 hub (with the GL0727 microSD reader)
+# hangs off the BCM2711's USB 2.0 OTG controller, which is disabled by
+# default on CM4. The vendor image enables it via dwc2 in host mode
+# (hardware/stellavita-cm4-32g/configs/config.txt) - do the same.
+grep -q '^dtoverlay=dwc2,dr_mode=host' "$CONFIG_TXT" || {
+    printf '\n[cm4]\n# OpenAstro StellaVita: internal USB 2.0 hub + SD reader (vendor dwc2 host mode)\ndtoverlay=dwc2,dr_mode=host\n\n[all]\n' \
+        >> "$CONFIG_TXT"
+}
+
 # The StellaVita's USB ports sit behind a Renesas uPD72020x xHCI controller
 # (xhci-pci-renesas) that needs firmware the stock image doesn't ship.
 # Without it the USB ports are dead. Bake it in and rebuild the initramfs
@@ -83,6 +94,69 @@ log "Installing Renesas uPD72020x USB firmware..."
 RENESAS_FW_URL="${RENESAS_FW_URL:-https://raw.githubusercontent.com/open-astro/uPD72020x/master/UPDATE.mem}"
 curl -fsSL "$RENESAS_FW_URL" -o /lib/firmware/renesas_usb_fw.mem
 update-initramfs -u >/dev/null 2>&1 || update-initramfs -c -k all >/dev/null
+
+# ============================================================
+# Buzzer: OpenAstro jingle on boot (piezo on BCM GPIO 12)
+# ============================================================
+# The StellaVita has a piezo speaker on GPIO 12 (not an ALSA device - the
+# vendor stack bit-bangs it, see hardware/stellavita-cm4-32g/scripts/as_beep).
+# Play the OpenAstro jingle once the system is up, the audible "ready to
+# connect" signal the vendor firmware gave (hardware/.../scripts/oa_beep.py).
+log "Installing buzzer jingle..."
+cat > /usr/local/sbin/openastro-beep <<'EOF'
+#!/usr/bin/python3
+# OpenAstro jingle on the StellaVita piezo (BCM GPIO 12)
+# usage: openastro-beep [gpio]
+import RPi.GPIO as GPIO
+import time
+import sys
+
+PIN = int(sys.argv[1]) if len(sys.argv) > 1 else 12
+
+# (freq_hz, duration_s) - 0 freq = rest
+# "O-pen-As-tro!" rising motif, then a little starlight trill
+TUNE = [
+    (523, 0.12), (0, 0.03),   # C5  O-
+    (659, 0.12), (0, 0.03),   # E5  pen
+    (784, 0.12), (0, 0.03),   # G5  As-
+    (1047, 0.22), (0, 0.08),  # C6  tro!
+    (1319, 0.07), (1568, 0.07), (2093, 0.18),  # E6 G6 C7 sparkle
+]
+
+def tone(hz, dur):
+    if hz == 0:
+        time.sleep(dur)
+        return
+    half = 1.0 / (2 * hz)
+    cycles = int(dur * hz)
+    for _ in range(cycles):
+        GPIO.output(PIN, GPIO.LOW)
+        time.sleep(half)
+        GPIO.output(PIN, GPIO.HIGH)
+        time.sleep(half)
+
+GPIO.setwarnings(False)
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(PIN, GPIO.OUT, initial=GPIO.HIGH)
+for hz, dur in TUNE:
+    tone(hz, dur)
+GPIO.cleanup()
+EOF
+chmod 755 /usr/local/sbin/openastro-beep
+
+cat > /etc/systemd/system/openastro-beep.service <<'EOF'
+[Unit]
+Description=OpenAstro: boot-ready jingle on the StellaVita buzzer
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/openastro-beep
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl enable openastro-beep.service >/dev/null 2>&1
 
 # ============================================================
 # WiFi access point (NetworkManager)

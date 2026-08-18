@@ -15,8 +15,17 @@ is baked into the image:
 - **12V power outputs** - GPIO 18, 10, 17, 4 driven high at boot via
   `config.txt`, so the DC outputs are live from power-on.
 - **USB ports** - GPIO 9 and 11 power the Cypress USB hub, and the Renesas
-  uPD72020x xHCI firmware (`renesas_usb_fw.mem`) is preinstalled and built
-  into the initramfs, so the USB ports work out of the box.
+  uPD720201 xHCI firmware (`renesas_usb_fw.mem`) is preinstalled and built
+  into the initramfs, so the USB 3.0 ports work out of the box. The BCM2711's
+  own USB 2.0 controller is enabled in host mode (`dtoverlay=dwc2` - vendor
+  setup) for the internal USB 2.0 hub and microSD card reader.
+- **Buzzer** - the OpenAstro jingle plays on the piezo (GPIO 12) once the
+  board is up, so you know it's ready without a screen
+  (`/usr/local/sbin/openastro-beep`).
+
+The vendor unit's full hardware and software inventory - captured live from
+a running StellaVita, with its original configs and scripts - lives in
+[`hardware/stellavita-cm4-32g/`](hardware/stellavita-cm4-32g/).
 
 ## Supported hardware
 
