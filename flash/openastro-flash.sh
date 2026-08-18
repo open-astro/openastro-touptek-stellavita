@@ -107,12 +107,30 @@ fetch_openastro_image() {
 # ------------------------------------------------------------
 # Device discovery
 # ------------------------------------------------------------
-# Snapshot of disks that exist BEFORE rpiboot, so the eMMC is identified as
-# the disk that newly appears - never guessed.
+# The eMMC is identified by the RPi mass-storage gadget's USB identity
+# (vendor/model "RPi-MSD"), with "disk that newly appeared since before
+# rpiboot" as a fallback - never guessed.
 list_disks() {
     case "$OS" in
     Linux)  lsblk -dno NAME,TYPE 2>/dev/null | awk '$2=="disk"{print $1}' ;;
     Darwin) diskutil list | awk '/^\/dev\/disk/{print $1}' | sed 's|/dev/||' ;;
+    esac
+}
+
+find_rpi_msd_disk() {
+    case "$OS" in
+    Linux)
+        lsblk -dno NAME,VENDOR,MODEL 2>/dev/null |
+            awk 'tolower($0) ~ /rpi|raspberry/ {print $1; exit}'
+        ;;
+    Darwin)
+        local x
+        for x in $(list_disks); do
+            if diskutil info "/dev/$x" 2>/dev/null | grep -qiE 'rpi|raspberry'; then
+                echo "$x"; return 0
+            fi
+        done
+        ;;
     esac
 }
 
@@ -131,22 +149,38 @@ run_rpiboot_and_find_device() {
     echo "     The board powers up over USB - do NOT connect DC power."
     echo
     read -r -p "Press Enter when the pins are shorted and the USB cable is connected... " _
-    log "Running rpiboot (waits for the CM4)..."
-    # The mass-storage gadget exports the eMMC as a USB disk; -d picks the
-    # gadget directory when rpiboot was built from source.
-    sudo rpiboot -d mass-storage-gadget64 || sudo rpiboot
 
-    log "Waiting for the eMMC to appear as a USB disk..."
-    for _ in $(seq 1 60); do
-        after="$(list_disks)"
-        new="$(comm -13 <(echo "$before" | sort) <(echo "$after" | sort) || true)"
-        if [ -n "$new" ]; then
-            d="$(echo "$new" | head -1)"
-            DEVICE="/dev/$d"
-            break
-        fi
-        sleep 1
-    done
+    # Maybe the gadget is already up from a previous run - skip rpiboot then.
+    d="$(find_rpi_msd_disk || true)"
+    if [ -n "$d" ]; then
+        log "RPi mass-storage gadget already present: /dev/$d"
+        DEVICE="/dev/$d"
+    else
+        log "Running rpiboot (waits for the CM4)..."
+        # The mass-storage gadget exports the eMMC as a USB disk. Plain
+        # 'rpiboot' does NOT load it (it just boots the board normally), so
+        # try the gadget dir name and the known install locations.
+        sudo rpiboot -d mass-storage-gadget64 ||
+            sudo rpiboot -d /usr/share/rpiboot/mass-storage-gadget64 ||
+            sudo rpiboot -d /usr/local/share/rpiboot/mass-storage-gadget64 ||
+            die "rpiboot could not load the mass-storage gadget (mass-storage-gadget64 not found)."
+
+        log "Waiting for the eMMC to appear as a USB disk..."
+        for _ in $(seq 1 60); do
+            # Prefer the gadget's USB identity (works even if the disk node
+            # already existed); fall back to the newly-appeared-disk diff.
+            d="$(find_rpi_msd_disk || true)"
+            if [ -z "$d" ]; then
+                after="$(list_disks)"
+                d="$(comm -13 <(echo "$before" | sort) <(echo "$after" | sort) | head -1 || true)"
+            fi
+            if [ -n "$d" ]; then
+                DEVICE="/dev/$d"
+                break
+            fi
+            sleep 1
+        done
+    fi
     [ -n "${DEVICE:-}" ] || die "eMMC never appeared as a disk. Check the USB cable (must be data-capable) and boot mode."
 
     # Sanity: the StellaVita eMMC is 32 GB (~29 GiB); refuse anything wildly

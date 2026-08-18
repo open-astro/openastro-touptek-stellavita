@@ -149,11 +149,16 @@ function Get-EmmcDisk {
     Write-Host '     The board powers up over USB - do NOT connect DC power.'
     Write-Host ''
     Read-Host 'Press Enter when the pins are shorted and the USB cable is connected' | Out-Null
-    Log 'Running rpiboot (waits for the CM4)...'
-    Start-Process -FilePath $rpiboot -Wait -NoNewWindow
 
-    Log 'Waiting for the eMMC to appear as a USB disk...'
-    $disk = $null
+    # Maybe the gadget is already up from a previous run - skip rpiboot then.
+    $disk = Get-Disk | Where-Object FriendlyName -match 'RPi-MSD' | Select-Object -First 1
+    if ($disk) {
+        Log "RPi mass-storage gadget already present: disk $($disk.Number)"
+    } else {
+        Log 'Running rpiboot (waits for the CM4)...'
+        Start-Process -FilePath $rpiboot -Wait -NoNewWindow
+        Log 'Waiting for the eMMC to appear as a USB disk...'
+    }
     for ($i = 0; $i -lt 60; $i++) {
         $disk = Get-Disk | Where-Object {
             ($_.Number -notin $before) -or ($_.FriendlyName -match 'RPi-MSD')
