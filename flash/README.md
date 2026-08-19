@@ -64,11 +64,16 @@ Each backup/flash/restore run walks you through the same steps:
    <img src="nrpiboot-jumper.webp"
         alt="StellaVita carrier board with the nRPIBOOT pads next to the SD-card slot shorted by a jumper wire and the USB-C cable connected"
         width="520">
-2. **Device safety checks** - the script identifies the eMMC as the disk
+2. **Device safety checks** - the script identifies the eMMC by the
+   mass-storage gadget's USB identity (`RPi-MSD`), falling back to the disk
    that *newly appeared* (never guessed), refuses anything that isn't
-   ~32 GB, and makes you re-type the device before touching it.
-3. **Read or write**, with progress, checksums for backups, and a final
-   sync/eject.
+   ~32 GB, and makes you re-type the device before touching it. If the
+   gadget is already connected from a previous run, it's picked up directly
+   without re-running rpiboot.
+3. **Read or write, then verify** - progress throughout; backups get a
+   `.sha256` checksum file, and every flash/restore write is verified by
+   reading the written data back off the eMMC and comparing SHA-256
+   checksums before declaring success.
 
 
 ## Notes per OS
