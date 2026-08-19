@@ -268,16 +268,27 @@ write_image() {
     local tmp want bytes got
     tmp="$(mktemp -d)"
     log "Writing $label -> $DEVICE ..."
+    log "(after the last progress line, dd flushes the final data to the eMMC -"
+    log " it can sit there a minute with the activity LED blinking; that's normal)"
     if [ "$OS" = Darwin ]; then
         decompress | tee >(sha_cmd | awk '{print $1}' > "$tmp/hash") >(wc -c > "$tmp/size") | sudo dd of="$(raw_device)" bs=4m
     else
-        decompress | tee >(sha_cmd | awk '{print $1}' > "$tmp/hash") >(wc -c > "$tmp/size") | sudo dd of="$(raw_device)" bs=4M status=progress conv=fsync
+        # oflag=direct bypasses the page cache so the progress numbers track
+        # what has actually reached the eMMC, instead of racing ahead and
+        # then silently stalling on one huge flush at the end.
+        decompress | tee >(sha_cmd | awk '{print $1}' > "$tmp/hash") >(wc -c > "$tmp/size") | sudo dd of="$(raw_device)" bs=4M status=progress oflag=direct conv=fsync
     fi
-    log "Write complete. Flushing buffers to the eMMC (this can take a minute - the activity LED blinks)..."
+    log "Write complete. Syncing..."
     sync
+    # The tee >(...) hashers run asynchronously - wait for their output files.
+    for _ in $(seq 1 50); do
+        [ -s "$tmp/hash" ] && [ -s "$tmp/size" ] && break
+        sleep 0.2
+    done
     want="$(cat "$tmp/hash")"
     bytes="$(tr -dc 0-9 < "$tmp/size")"
     rm -rf "$tmp"
+    [ -n "$want" ] && [ -n "$bytes" ] || die "internal error: checksum of the written stream was not captured."
 
     log "Verifying: reading back $((bytes / 1000000)) MB from the eMMC and comparing checksums..."
     if [ "$OS" = Darwin ]; then
