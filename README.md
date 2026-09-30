@@ -31,7 +31,7 @@ a running StellaVita, with its original configs and scripts - lives in
 
 | Device | Kernel | Status |
 |--------|--------|--------|
-| ToupTek StellaVita (Pi CM4) | Raspberry Pi OS stock | 🚧 Validation pending |
+| ToupTek StellaVita (Pi CM4) | Raspberry Pi OS stock | ✅ Tested and working |
 
 > **ZWO EAF/EFW:** the stock Raspberry Pi OS kernel ships with HIDRAW
 > enabled, and the image bakes in a udev rule granting device access, so ZWO
